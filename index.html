@@ -67,18 +67,21 @@
 
     <div class="card">
       <div class="controls">
-        <input id="name" placeholder="Anyag neve (pl. 7.61 festék)" autocomplete="off">
+        <input id="name" placeholder="Anyag neve (pl. Gold 7.61 …)" autocomplete="off">
         <input id="qty" type="number" inputmode="numeric" placeholder="Darab">
         <input id="note" placeholder="Megjegyzés">
         <button id="addBtn">Hozzáad</button>
       </div>
+
       <div class="search">
-  <input id="search" placeholder="Keresés név / megjegyzés szerint…">
-  <button id="exportBtn">CSV</button>
-  <button id="importBtn">Import</button>
-  <input id="importFile" type="file" accept=".csv,text/csv" style="display:none">
-</div>
+        <input id="search" placeholder="Keresés név / megjegyzés szerint…">
+        <button id="exportBtn">CSV</button>
+        <button id="importBtn">Import</button>
+        <input id="importFile" type="file" accept=".csv,text/csv" style="display:none">
+      </div>
+
       <label class="checkbox"><input type="checkbox" id="hideZero"> 0 darabos tételek elrejtése</label>
+
       <div class="tools">
         <button id="shareBtn" class="primary">Megosztás</button>
         <button id="copyBtn">Másolás</button>
@@ -99,16 +102,24 @@ const qtyEl = $('#qty');
 const noteEl = $('#note');
 const searchEl = $('#search');
 const hideZeroEl = $('#hideZero');
+const importBtn  = $('#importBtn');
+const importFile = $('#importFile');
 
 let data = JSON.parse(localStorage.getItem('anyaglista_v1') || '[]');
 
-function save(){ localStorage.setItem('anyaglista_v1', JSON.stringify(data)); }
+function save(){
+  localStorage.setItem('anyaglista_v1', JSON.stringify(data));
+}
 
 function addItem(name, qty, note=""){
   if (!name) return;
   const ex = data.find(d => d.name.trim().toLowerCase() === name.trim().toLowerCase());
-  if (ex){ ex.qty = Number(ex.qty||0) + Number(qty||0); if (note) ex.note = note; }
-  else data.unshift({id:Date.now()+Math.random(), name:name.trim(), qty:Number(qty||0), note:note.trim()});
+  if (ex){
+    ex.qty = Number(ex.qty||0) + Number(qty||0);
+    if (note) ex.note = note;
+  } else {
+    data.unshift({id:Date.now()+Math.random(), name:name.trim(), qty:Number(qty||0), note:note.trim()});
+  }
   save(); render();
 }
 
@@ -179,6 +190,65 @@ function exportCSV(){
   URL.revokeObjectURL(url);
 }
 
+/* ---- CSV IMPORT ---- */
+function parseCSV(text){
+  const rows = [];
+  let row = [], cur = '', inQ = false;
+  for (let i=0;i<text.length;i++){
+    const ch=text[i], next=text[i+1];
+    if(inQ){
+      if(ch=='"' && next=='"'){ cur+='"'; i++; }
+      else if(ch=='"'){ inQ=false; }
+      else cur+=ch;
+    }else{
+      if(ch=='"'){ inQ=true; }
+      else if(ch==','){ row.push(cur); cur=''; }
+      else if(ch=='\n' || ch=='\r'){
+        if(cur!=='' || row.length){ row.push(cur); rows.push(row); row=[]; cur=''; }
+        if(ch=='\r' && next=='\n') i++;
+      }else cur+=ch;
+    }
+  }
+  if(cur!=='' || row.length){ row.push(cur); rows.push(row); }
+  return rows;
+}
+
+async function importCSVFile(file){
+  const text = await file.text();
+  const rows = parseCSV(text);
+  if(!rows.length){ alert('Üres CSV'); return; }
+
+  // Fejléc felismerés (Név,Darab,Megjegyzés)
+  let start = 0;
+  const header = rows[0].map(s=>s.trim().toLowerCase());
+  if(header[0]==='név' || header[1]==='darab') start = 1;
+
+  const imported = [];
+  for(let i=start;i<rows.length;i++){
+    const [nev, darab, megj] = rows[i];
+    if(!nev) continue;
+    imported.push({ name:String(nev).trim(), qty:Number(darab||0), note:String(megj||'').trim() });
+  }
+  if(!imported.length){ alert('Nincs beolvasható sor'); return; }
+
+  const overwrite = confirm('Felülírjam a jelenlegi listát? (OK = Felülír, Mégse = Hozzáfűz)');
+  if(overwrite) data = [];
+
+  // Összefésülés név szerint
+  for(const it of imported){
+    const ex = data.find(d => d.name.trim().toLowerCase() === it.name.toLowerCase());
+    if(ex){
+      ex.qty = Number(ex.qty||0) + Number(it.qty||0);
+      if(it.note) ex.note = it.note;
+    }else{
+      data.push({ id: Date.now()+Math.random(), name: it.name, qty: Number(it.qty||0), note: it.note });
+    }
+  }
+  save(); render();
+  alert('Import kész ✅');
+}
+/* ---- CSV IMPORT VÉGE ---- */
+
 function escapeHtml(s){return s.replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
 
 $('#addBtn').addEventListener('click', ()=>{
@@ -208,6 +278,14 @@ $('#resetBtn').addEventListener('click', ()=>{
 $('#exportBtn').addEventListener('click', exportCSV);
 searchEl.addEventListener('input', ()=>render());
 hideZeroEl.addEventListener('change', ()=>render());
+
+/* Import gomb események */
+importBtn.addEventListener('click', ()=> importFile.click());
+importFile.addEventListener('change', (e)=>{
+  const f = e.target.files && e.target.files[0];
+  if(f) importCSVFile(f);
+  importFile.value = ''; // egymás után is lehessen
+});
 
 render();
 </script>
